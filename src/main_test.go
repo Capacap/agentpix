@@ -389,11 +389,13 @@ func TestValidatePaths(t *testing.T) {
 
 func TestLoadSession(t *testing.T) {
 	tests := []struct {
-		name    string
-		setup   func(t *testing.T) string // returns session file path
-		model   string
-		wantErr string
-		wantLen int
+		name      string
+		setup     func(t *testing.T) string // returns session file path
+		model     string
+		wantErr   string
+		wantLen   int
+		wantRatio string
+		wantSize  string
 	}{
 		{
 			name: "file missing",
@@ -488,12 +490,33 @@ func TestLoadSession(t *testing.T) {
 			model:   "pro-3.0",
 			wantLen: 1,
 		},
+		{
+			name: "settings preserved in returned session",
+			setup: func(t *testing.T) string {
+				sess := sessionData{
+					Model: "flash-3.1",
+					Ratio: "2:3",
+					Size:  "2K",
+					History: []*genai.Content{
+						{Role: "user", Parts: []*genai.Part{{Text: "hello"}}},
+					},
+				}
+				data, _ := json.Marshal(sess)
+				p := filepath.Join(t.TempDir(), "session.json")
+				os.WriteFile(p, data, 0644)
+				return p
+			},
+			model:     "flash-3.1",
+			wantLen:   1,
+			wantRatio: "2:3",
+			wantSize:  "2K",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := tt.setup(t)
-			history, err := loadSession(path, tt.model)
+			sess, err := loadSession(path, tt.model)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
@@ -506,8 +529,14 @@ func TestLoadSession(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if len(history) != tt.wantLen {
-				t.Fatalf("history length = %d, want %d", len(history), tt.wantLen)
+			if len(sess.History) != tt.wantLen {
+				t.Fatalf("history length = %d, want %d", len(sess.History), tt.wantLen)
+			}
+			if tt.wantRatio != "" && sess.Ratio != tt.wantRatio {
+				t.Errorf("ratio = %q, want %q", sess.Ratio, tt.wantRatio)
+			}
+			if tt.wantSize != "" && sess.Size != tt.wantSize {
+				t.Errorf("size = %q, want %q", sess.Size, tt.wantSize)
 			}
 		})
 	}
@@ -598,12 +627,12 @@ func TestCleanHistoryForResume(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 
-		history, err := loadSession(path, testFlashName)
+		loaded, err := loadSession(path, testFlashName)
 		if err != nil {
 			t.Fatalf("loadSession: %v", err)
 		}
 
-		modelParts := history[1].Parts
+		modelParts := loaded.History[1].Parts
 		if len(modelParts) != 1 {
 			t.Fatalf("model parts = %d, want 1 (image only)", len(modelParts))
 		}

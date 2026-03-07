@@ -20,6 +20,7 @@ type usageData struct {
 
 type sessionData struct {
 	Model   string           `json:"model"`
+	Ratio   string           `json:"ratio,omitempty"`
 	Size    string           `json:"size,omitempty"`
 	History []*genai.Content `json:"history"`
 	Usage   *usageData       `json:"usage,omitempty"`
@@ -103,8 +104,8 @@ func cleanHistoryForResume(history []*genai.Content) []*genai.Content {
 }
 
 // loadSession reads a session file for continuation, validating that its model
-// matches the requested model. Returns the conversation history.
-func loadSession(path, model string) ([]*genai.Content, error) {
+// matches the requested model. Returns the session data with cleaned history.
+func loadSession(path, model string) (*sessionData, error) {
 	sess, _, err := readSession(path)
 	if err != nil {
 		return nil, err
@@ -112,9 +113,11 @@ func loadSession(path, model string) ([]*genai.Content, error) {
 	if sess.Model != "" && sess.Model != model {
 		// Legacy sessions stored bare aliases ("flash", "pro"); allow if same family
 		if target, isAlias := modelAliases[sess.Model]; isAlias && modelDefs[target].Family == modelDefs[model].Family {
-			return cleanHistoryForResume(sess.History), nil
+			sess.History = cleanHistoryForResume(sess.History)
+			return sess, nil
 		}
 		return nil, fmt.Errorf("session was created with %q but -m is %q; pass -m %s to continue this session", sess.Model, model, sess.Model)
 	}
-	return cleanHistoryForResume(sess.History), nil
+	sess.History = cleanHistoryForResume(sess.History)
+	return sess, nil
 }

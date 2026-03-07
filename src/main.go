@@ -142,10 +142,23 @@ func run(args []string) error {
 
 	var history []*genai.Content
 	if opts.session != "" {
-		history, err = loadSession(opts.session, opts.model)
-		if err != nil {
-			return err
+		sess, loadErr := loadSession(opts.session, opts.model)
+		if loadErr != nil {
+			return loadErr
 		}
+		history = sess.History
+		// Inherit settings from session when not explicitly provided
+		if opts.ratio == "" && sess.Ratio != "" {
+			opts.ratio = sess.Ratio
+		}
+		if opts.size == "" && sess.Size != "" {
+			opts.size = sess.Size
+		}
+	}
+
+	// Apply defaults for settings not set by flags or session
+	if opts.ratio == "" {
+		opts.ratio = "1:1"
 	}
 
 	ctx := context.Background()
@@ -221,7 +234,7 @@ func run(args []string) error {
 			TotalTokens:     result.UsageMetadata.TotalTokenCount,
 		}
 	}
-	sessBytes, err := json.Marshal(sessionData{Model: opts.model, Size: opts.size, History: chat.History(true), Usage: usage})
+	sessBytes, err := json.Marshal(sessionData{Model: opts.model, Ratio: opts.ratio, Size: opts.size, History: chat.History(true), Usage: usage})
 	if err != nil {
 		return fmt.Errorf("failed to serialize session: %v", err)
 	}
@@ -243,7 +256,7 @@ func parseAndValidateFlags(args []string) (*options, error) {
 	fs.Var(&inputs, "i", "input image path (repeatable, for editing/reference)")
 	session := fs.String("s", "", "session file to continue from")
 	model := fs.String("m", "flash", "model name")
-	ratio := fs.String("r", "1:1", "aspect ratio: 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9")
+	ratio := fs.String("r", "", "aspect ratio: 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9")
 	size := fs.String("z", "", "output size: 1K, 2K, or 4K (flash-3.1, pro-3.0)")
 	force := fs.Bool("f", false, "overwrite output and session files if they exist")
 
@@ -269,7 +282,7 @@ func parseAndValidateFlags(args []string) (*options, error) {
 		return nil, fmt.Errorf("unknown model %q: valid models are %s", *model, validModelNames())
 	}
 
-	if !validRatios[*ratio] {
+	if *ratio != "" && !validRatios[*ratio] {
 		return nil, fmt.Errorf("invalid aspect ratio %q", *ratio)
 	}
 
