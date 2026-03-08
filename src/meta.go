@@ -20,6 +20,7 @@ type imageMetadata struct {
 	ModelID   string        `json:"model_id"`
 	Ratio     string        `json:"ratio"`
 	Size      string        `json:"size,omitempty"`
+	Thinking  string        `json:"thinking,omitempty"`
 	Inputs    []string      `json:"inputs,omitempty"`
 	Session   string        `json:"session,omitempty"`
 	Timestamp string        `json:"timestamp"`
@@ -70,6 +71,7 @@ func buildMetadata(opts *options, history []*genai.Content) imageMetadata {
 		ModelID:   opts.modelID,
 		Ratio:     opts.ratio,
 		Size:      opts.size,
+		Thinking:  opts.thinking,
 		Inputs:    inputs,
 		Session:   session,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -125,6 +127,9 @@ func runMeta(args []string) error {
 	fmt.Printf("ratio:     %s\n", meta.Ratio)
 	if meta.Size != "" {
 		fmt.Printf("size:      %s\n", meta.Size)
+	}
+	if meta.Thinking != "" {
+		fmt.Printf("thinking:  %s\n", meta.Thinking)
 	}
 	fmt.Printf("timestamp: %s\n", meta.Timestamp)
 	if len(meta.Inputs) > 0 {

@@ -16,21 +16,22 @@ import (
 )
 
 type modelDef struct {
-	ID             string
-	Family         string
-	MaxInputImages int
-	InputPerMTok   float64            // USD per 1M input tokens
-	OutputPerMTok  float64            // USD per 1M output text tokens
-	Sizes          []string           // supported output sizes, e.g. ["1K"] or ["1K","2K","4K"]
-	ImagePrices    map[string]float64 // size -> per-image USD cost
+	ID               string
+	Family           string
+	MaxInputImages   int
+	InputPerMTok     float64            // USD per 1M input tokens
+	OutputPerMTok    float64            // USD per 1M output text tokens
+	Sizes            []string           // supported output sizes, e.g. ["1K"] or ["1K","2K","4K"]
+	ImagePrices      map[string]float64 // size -> per-image USD cost
+	ThinkingLevels   []string           // supported thinking levels, e.g. ["min","high"]
 }
 
 const pricesCollected = "2026-02-26"
 
 var modelDefs = map[string]modelDef{
 	"flash-2.5": {ID: "gemini-2.5-flash-image", Family: "flash", MaxInputImages: 3, InputPerMTok: 0.30, OutputPerMTok: 0.60, Sizes: []string{"1K"}, ImagePrices: map[string]float64{"1K": 0.039}},
-	"flash-3.1": {ID: "gemini-3.1-flash-image-preview", Family: "flash", MaxInputImages: 14, InputPerMTok: 0.25, OutputPerMTok: 1.50, Sizes: []string{"1K", "2K", "4K"}, ImagePrices: map[string]float64{"1K": 0.067, "2K": 0.101, "4K": 0.151}},
-	"pro-3.0":   {ID: "gemini-3-pro-image-preview", Family: "pro", MaxInputImages: 14, InputPerMTok: 2.00, OutputPerMTok: 12.00, Sizes: []string{"1K", "2K", "4K"}, ImagePrices: map[string]float64{"1K": 0.134, "2K": 0.134, "4K": 0.240}},
+	"flash-3.1": {ID: "gemini-3.1-flash-image-preview", Family: "flash", MaxInputImages: 14, InputPerMTok: 0.25, OutputPerMTok: 1.50, Sizes: []string{"1K", "2K", "4K"}, ImagePrices: map[string]float64{"1K": 0.067, "2K": 0.101, "4K": 0.151}, ThinkingLevels: []string{"min", "high"}},
+	"pro-3.0":   {ID: "gemini-3-pro-image-preview", Family: "pro", MaxInputImages: 14, InputPerMTok: 2.00, OutputPerMTok: 12.00, Sizes: []string{"1K", "2K", "4K"}, ImagePrices: map[string]float64{"1K": 0.134, "2K": 0.134, "4K": 0.240}, ThinkingLevels: []string{"min", "high"}},
 }
 
 var modelAliases = map[string]string{
@@ -82,9 +83,10 @@ type options struct {
 	session string
 	model   string // resolved name: "flash-3.1", "flash-2.5", "pro-3.0"
 	modelID string // full model ID from modelDefs map
-	ratio   string
-	size    string // normalized: "" or "1K"/"2K"/"4K"
-	force   bool
+	ratio    string
+	size     string // normalized: "" or "1K"/"2K"/"4K"
+	thinking string // "min" or "high"; empty means API default
+	force    bool
 }
 
 const usageText = `usage: banana -p <prompt> -o <output> [flags]
@@ -101,6 +103,7 @@ flags:
   -m   model: flash (default), pro, flash-2.5, flash-3.1, pro-3.0
   -r   aspect ratio: 1:1 (default), 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9
   -z   output size: 1K, 2K, 4K (flash-3.1, pro-3.0)
+  -t   thinking level: min (default), high (flash-3.1, pro-3.0)
   -f   overwrite existing output and session files
 
 subcommands:
@@ -158,11 +161,17 @@ func run(args []string) error {
 		if opts.size == "" && sess.Size != "" {
 			opts.size = sess.Size
 		}
+		if opts.thinking == "" && sess.Thinking != "" {
+			opts.thinking = sess.Thinking
+		}
 	}
 
 	// Apply defaults for settings not set by flags or session
 	if opts.ratio == "" {
 		opts.ratio = "1:1"
+	}
+	if opts.thinking == "" && len(modelDefs[opts.model].ThinkingLevels) > 0 {
+		opts.thinking = "min"
 	}
 
 	ctx := context.Background()
@@ -176,6 +185,16 @@ func run(args []string) error {
 			AspectRatio: opts.ratio,
 			ImageSize:   opts.size,
 		},
+	}
+
+	if opts.thinking != "" {
+		level := genai.ThinkingLevelMinimal
+		if opts.thinking == "high" {
+			level = genai.ThinkingLevelHigh
+		}
+		config.ThinkingConfig = &genai.ThinkingConfig{
+			ThinkingLevel: level,
+		}
 	}
 
 	chat, err := client.Chats.Create(ctx, opts.modelID, config, history)
@@ -238,7 +257,7 @@ func run(args []string) error {
 			TotalTokens:     result.UsageMetadata.TotalTokenCount,
 		}
 	}
-	sessBytes, err := json.Marshal(sessionData{Model: opts.model, Ratio: opts.ratio, Size: opts.size, History: chat.History(true), Usage: usage})
+	sessBytes, err := json.Marshal(sessionData{Model: opts.model, Ratio: opts.ratio, Size: opts.size, Thinking: opts.thinking, History: chat.History(true), Usage: usage})
 	if err != nil {
 		return fmt.Errorf("failed to serialize session: %v", err)
 	}
@@ -262,6 +281,7 @@ func parseAndValidateFlags(args []string) (*options, error) {
 	model := fs.String("m", "flash", "model name")
 	ratio := fs.String("r", "", "aspect ratio: 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9")
 	size := fs.String("z", "", "output size: 1K, 2K, or 4K (flash-3.1, pro-3.0)")
+	thinking := fs.String("t", "", "thinking level: min or high (flash-3.1, pro-3.0)")
 	force := fs.Bool("f", false, "overwrite output and session files if they exist")
 
 	if err := fs.Parse(args); err != nil {
@@ -316,6 +336,31 @@ func parseAndValidateFlags(args []string) (*options, error) {
 		imageSize = normalized
 	}
 
+	var thinkingLevel string
+	if *thinking != "" {
+		thinkingLevel = strings.ToLower(*thinking)
+		if len(def.ThinkingLevels) == 0 {
+			var alts []string
+			for name, d := range modelDefs {
+				if len(d.ThinkingLevels) > 0 {
+					alts = append(alts, name)
+				}
+			}
+			sort.Strings(alts)
+			return nil, fmt.Errorf("-t is not supported by %s; models with thinking control: %s", resolved, strings.Join(alts, ", "))
+		}
+		found := false
+		for _, l := range def.ThinkingLevels {
+			if l == thinkingLevel {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("invalid thinking level %q for %s: supported levels are %s", thinkingLevel, resolved, strings.Join(def.ThinkingLevels, ", "))
+		}
+	}
+
 	if len(inputs) > def.MaxInputImages {
 		hint := ""
 		var maxAvail int
@@ -350,11 +395,12 @@ func parseAndValidateFlags(args []string) (*options, error) {
 		output:  *output,
 		inputs:  inputs,
 		session: *session,
-		model:   resolved,
-		modelID: def.ID,
-		ratio:   *ratio,
-		size:    imageSize,
-		force:   *force,
+		model:    resolved,
+		modelID:  def.ID,
+		ratio:    *ratio,
+		size:     imageSize,
+		thinking: thinkingLevel,
+		force:    *force,
 	}, nil
 }
 

@@ -19,11 +19,12 @@ type usageData struct {
 }
 
 type sessionData struct {
-	Model   string           `json:"model"`
-	Ratio   string           `json:"ratio,omitempty"`
-	Size    string           `json:"size,omitempty"`
-	History []*genai.Content `json:"history"`
-	Usage   *usageData       `json:"usage,omitempty"`
+	Model    string           `json:"model"`
+	Ratio    string           `json:"ratio,omitempty"`
+	Size     string           `json:"size,omitempty"`
+	Thinking string           `json:"thinking,omitempty"`
+	History  []*genai.Content `json:"history"`
+	Usage    *usageData       `json:"usage,omitempty"`
 }
 
 // readSession parses a session file and returns the session data and file size.
